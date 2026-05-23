@@ -1,4 +1,4 @@
-package com.example.debttracker
+package com.minleafu.oweyeah
 
 import android.content.ClipData
 import android.content.ClipboardManager
