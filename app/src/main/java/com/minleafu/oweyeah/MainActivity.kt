@@ -73,6 +73,25 @@ fun DebtTrackerTheme(content: @Composable () -> Unit) {
     )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+fun formatDebt(value: Double): String {
+    val abs = kotlin.math.abs(value)
+    return when {
+        abs == kotlin.math.floor(abs) -> "%.0f".format(abs)          // 5.000 → "5"
+        (abs * 10) == kotlin.math.floor(abs * 10) -> "%.1f".format(abs) // 5.100 → "5.1" (shouldn't happen but safe)
+        (abs * 100) % 1.0 == 0.0 -> "%.2f".format(abs)              // 5.120 → "5.12"
+        else -> "%.3f".format(abs)                                    // 5.123 → "5.123"
+    }
+}
+
+fun formatRaw(value: Double): String {
+    return when {
+        value == kotlin.math.floor(value) -> "%.0f".format(value)
+        (value * 100) % 1.0 == 0.0 -> "%.2f".format(value)
+        else -> "%.3f".format(value)
+    }
+}
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 fun saveDebt(context: Context, value: Double) {
     context.getSharedPreferences("debt_prefs", Context.MODE_PRIVATE)
@@ -92,10 +111,12 @@ fun DebtTrackerApp() {
     val context = LocalContext.current
 
     // State
-    var debt     by remember { mutableStateOf(loadDebt(context)) }
-    var payer    by remember { mutableStateOf("Cream") }   // "Cream" | "Fenn"
-    var amount   by remember { mutableStateOf("") }
-    var splitMode by remember { mutableStateOf(false) }
+    var debt           by remember { mutableStateOf(loadDebt(context)) }
+    var payer          by remember { mutableStateOf("Cream") }
+    var amount         by remember { mutableStateOf("") }
+    var splitMode      by remember { mutableStateOf(false) }
+    var editingBalance by remember { mutableStateOf(false) }
+    var balanceInput   by remember { mutableStateOf("") }
 
     // Derived colours based on who owes whom
     val isPositive = debt >= 0.0  // +ve => Cream owes Fenn
@@ -132,11 +153,7 @@ fun DebtTrackerApp() {
                     .fillMaxWidth()
                     .shadow(24.dp, RoundedCornerShape(24.dp))
                     .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(SurfaceDark, SurfaceMid)
-                        )
-                    )
+                    .background(Brush.linearGradient(listOf(SurfaceDark, SurfaceMid)))
                     .border(
                         width = 1.dp,
                         brush = Brush.linearGradient(listOf(owingColor.copy(0.4f), Color.Transparent)),
@@ -154,25 +171,84 @@ fun DebtTrackerApp() {
                         letterSpacing = 3.sp
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        "%.3f".format(abs(debt)),
-                        color = owingColor,
-                        fontSize = 52.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "raw balance: ${"%.3f".format(debt)}",
-                        color = TextSecondary,
-                        fontSize = 12.sp
-                    )
+
+                    if (editingBalance) {
+                        OutlinedTextField(
+                            value = balanceInput,
+                            onValueChange = { balanceInput = it.filter { c -> c.isDigit() || c == '.' || c == '-' } },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.Black,
+                                color = owingColor,
+                                textAlign = TextAlign.Center
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = owingColor,
+                                unfocusedBorderColor = owingColor.copy(0.5f),
+                                focusedTextColor = owingColor,
+                                unfocusedTextColor = owingColor,
+                                cursorColor = owingColor
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { editingBalance = false },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, TextSecondary.copy(0.4f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                            ) { Text("Cancel") }
+                            Button(
+                                onClick = {
+                                    val parsed = balanceInput.toDoubleOrNull()
+                                    if (parsed != null) {
+                                        debt = Math.round(parsed * 1000) / 1000.0
+                                        saveDebt(context, debt)
+                                        editingBalance = false
+                                        Toast.makeText(context, "Balance updated", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Invalid number", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = owingColor),
+                                shape = RoundedCornerShape(10.dp)
+                            ) { Text("Save", color = Color.White) }
+                        }
+                    } else {
+                        Text(
+                            formatDebt(debt),
+                            color = owingColor,
+                            fontSize = 52.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "raw balance: ${formatRaw(debt)}",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(
+                            onClick = {
+                                balanceInput = debt.toString()
+                                editingBalance = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+                        ) {
+                            Text("✏ Edit balance", color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
                 }
             }
 
             // ── Copy Button ───────────────────────────────────────────────
             OutlinedButton(
                 onClick = {
-                    val text = "Total: ${"%.3f".format(debt)}\n-ve: fenn -> cream\n+ve: cream -> fenn"
+                    val text = "Total: ${formatRaw(debt)}\n-ve: fenn -> cream\n+ve: cream -> fenn"
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("debt", text))
                     Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
@@ -276,7 +352,7 @@ fun DebtTrackerApp() {
                     debt = Math.round(debt * 1000) / 1000.0
                     saveDebt(context, debt)
                     amount = ""
-                    Toast.makeText(context, "$payer paid ${"%.3f".format(effective)}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "$payer paid ${formatDebt(effective)}", Toast.LENGTH_SHORT).show()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = activeColor),
                 shape = RoundedCornerShape(14.dp),
@@ -286,7 +362,8 @@ fun DebtTrackerApp() {
                     .shadow(16.dp, RoundedCornerShape(14.dp), spotColor = activeColor)
             ) {
                 val displayAmt = amount.toDoubleOrNull()?.let {
-                    "%.3f".format(if (splitMode) it / 2.0 else it)
+                    val v = if (splitMode) it / 2.0 else it
+                    formatDebt(v)
                 } ?: "—"
                 Text(
                     "$payer paid  •  $displayAmt",
